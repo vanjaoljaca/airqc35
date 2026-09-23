@@ -47,7 +47,8 @@ final class QC35Panel: NSObject, NSWindowDelegate {
         window.hidesOnDeactivate = true
         window.isOpaque = false
         window.backgroundColor = .clear
-        window.hasShadow = true
+        // The glass owns its rounded edge; a window shadow can outline the rectangular host.
+        window.hasShadow = false
         window.level = .floating
         window.delegate = self
     }
