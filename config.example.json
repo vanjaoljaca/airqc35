@@ -1,0 +1,8 @@
+{
+  "headsetName": "Bose QC35 II",
+  "preferredInput": "MacBook Pro Microphone",
+  "fallbackInput": "MacBook Pro Microphone",
+  "releaseOnSleep": true,
+  "avoidHeadsetMic": true,
+  "visibleSourceAddresses": []
+}
