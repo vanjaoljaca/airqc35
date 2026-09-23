@@ -60,7 +60,7 @@ struct QC35View: View {
                 Text(source.name).lineLimit(1)
                 Spacer(minLength: 4)
                 Group {
-                    if source.status == 1 || source.status == 3 { Image(systemName: "checkmark.circle.fill").foregroundStyle(.tint) }
+                    if model.selectedAddress == source.address { Image(systemName: "checkmark.circle.fill").foregroundStyle(.tint) }
                     else { Color.clear }
                 }.frame(width: 34, height: 18, alignment: .trailing)
             }

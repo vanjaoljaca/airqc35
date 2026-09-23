@@ -37,7 +37,7 @@ function plist(path: string, data: any) {
 }
 mkdirSync(join(root, 'QC35.xcodeproj'), { recursive: true });
 plist('QC35.xcodeproj/project.pbxproj', { archiveVersion: 1, classes: {}, objectVersion: 56, objects, rootObject: id('project') });
-const info = { CFBundleDevelopmentRegion: 'en', CFBundleExecutable: '$(EXECUTABLE_NAME)', CFBundleIdentifier: '$(PRODUCT_BUNDLE_IDENTIFIER)', CFBundleName: '$(PRODUCT_NAME)', CFBundleDisplayName: 'QC35', CFBundleShortVersionString: '1.0', CFBundleVersion: '2', LSMinimumSystemVersion: '27.0' };
+const info = { CFBundleDevelopmentRegion: 'en', CFBundleExecutable: '$(EXECUTABLE_NAME)', CFBundleIdentifier: '$(PRODUCT_BUNDLE_IDENTIFIER)', CFBundleName: '$(PRODUCT_NAME)', CFBundleDisplayName: 'QC35', CFBundleShortVersionString: '1.0', CFBundleVersion: '5', LSMinimumSystemVersion: '27.0' };
 plist('QC35.plist', { ...info, CFBundlePackageType: 'APPL', NSPrincipalClass: 'NSApplication', LSUIElement: true, NSBluetoothAlwaysUsageDescription: 'Read QC35 paired devices and reconnect the device you choose.' });
 plist('QC35Widget.plist', { ...info, CFBundlePackageType: 'XPC!', NSExtension: { NSExtensionPointIdentifier: 'com.apple.widgetkit-extension' } });
 plist('Widget.entitlements', { 'com.apple.security.app-sandbox': true });

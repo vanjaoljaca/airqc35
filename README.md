@@ -10,7 +10,7 @@ This is an experimental source release of a personal utility. Open it from its C
 
 - **Lid release:** closes the configured headset connection when the lid closes, all displays sleep, or the system begins sleeping. The helper never reconnects on wake.
 - **Avoid headset mic:** restores a configured preferred microphone, with a configured fallback, while the headset is present. It does not remember an arbitrary previously selected microphone.
-- **Device:** reads the headset's saved Bluetooth sources and lets you request a connection. A checkmark requires a fresh connected status; a protocol acknowledgement alone is insufficient.
+- **Device:** hands the headset to the chosen device. Mac selection routes sound to QC35 and releases the other source; phone selection confirms the phone connection before releasing the Mac. The rows are saved destinations, so disconnected devices remain available to select. One checkmark records the last verified handoff.
 - **Control Center:** a WidgetKit control opens the companion app. Both switches persist locally and update the running helper.
 
 The helper uses Core Audio, IOBluetooth, IOKit, and AppKit notifications. It has bounded retries and no periodic device polling. The companion uses SwiftUI, AppKit, WidgetKit, and App Intents. No third-party runtime dependencies are required.
@@ -64,13 +64,23 @@ build/tests/QC35ReleaseTests
 xcrun swiftc -O -warnings-as-errors -parse-as-library -D BOSE_SOURCE_PROBE \
   ControlCenter/App/BoseSources.swift -o build/tests/BoseSourceProbe
 build/tests/BoseSourceProbe --self-test
+xcrun swiftc -swift-version 5 -warnings-as-errors -parse-as-library \
+  -D QC35_HANDOFF_TEST ControlCenter/App/MacConnection.swift \
+  ControlCenter/App/BoseSources.swift -o build/tests/QC35HandoffTests
+build/tests/QC35HandoffTests
+xcrun swiftc -swift-version 5 -warnings-as-errors -parse-as-library \
+  -D QC35_MODEL_TEST ControlCenter/App/QC35Model.swift \
+  ControlCenter/App/MacConnection.swift ControlCenter/App/BoseSources.swift \
+  -o build/tests/QC35SelectionCacheTests
+build/tests/QC35SelectionCacheTests
 ```
 
-The current suite contains 31 policy/configuration tests and 15 offline protocol checks.
+The current suite contains 31 policy/configuration tests, 21 offline protocol and selection checks, 13 native-operation lifecycle checks, and 3 selection-cache checks.
 
 ## Known limits
 
-- Real source-list reads and the Control Center entry point have been exercised. A phone connection request received an acknowledgement but the phone remained disconnected until timeout. Successful phone reconnection is not verified.
+- Phone handoff has been verified by a fresh phone-connected status followed by confirmed Mac disconnection. Once the Mac is released, the panel retains the last verified destination because it cannot query the headset without reconnecting. This does not prove phone audio playback has started.
+- The destination must have Bluetooth enabled and be reachable. Saved pairings are not proof that a device is currently online. The app does not turn on another device's Bluetooth, start its playback, or remove any pairing.
 - Physical lid-close/sleep release and subsequent phone playback still need a hardware acceptance check.
 - The popup uses Apple's regular Liquid Glass material for text legibility, with a single native `NSGlassEffectView` and no extra blur layer. Its appearance follows macOS settings and the content behind the panel.
 - Apple's public Control Center API offers buttons and toggles. A custom expanded Control Center panel like Apple's Bluetooth UI is not exposed by the APIs used here.
