@@ -1,8 +1,10 @@
 # QC35 for macOS
 
-A small native utility for Bose QC35 II headphones: release the Mac's connection when it becomes unavailable, keep a preferred microphone selected, and expose device controls in Control Center.
+A macOS helper for QC35 headphones that stay connected after you close the lid or keep taking over your microphone.
 
-This is an experimental source release of a personal utility. The current popup still uses a custom glass panel; replacing it with a standard native popover is planned.
+![QC35 Control Center panel with device selection and two settings](docs/images/qc35-control-panel.jpg)
+
+This is an experimental source release of a personal utility. Open it from its Control Center tile; it does not add a separate menu-bar icon.
 
 ## What it does
 
@@ -70,7 +72,7 @@ The current suite contains 31 policy/configuration tests and 15 offline protocol
 
 - Real source-list reads and the Control Center entry point have been exercised. A phone connection request received an acknowledgement but the phone remained disconnected until timeout. Successful phone reconnection is not verified.
 - Physical lid-close/sleep release and subsequent phone playback still need a hardware acceptance check.
-- The popup's glass appearance is unfinished. It currently stacks a visual-effect background and a glass view in a custom panel. The planned replacement is `NSStatusItem` plus `NSPopover`; it has not been implemented here.
+- The popup uses Apple's regular Liquid Glass material for text legibility, with a single native `NSGlassEffectView` and no extra blur layer. Its appearance follows macOS settings and the content behind the panel.
 - Apple's public Control Center API offers buttons and toggles. A custom expanded Control Center panel like Apple's Bluetooth UI is not exposed by the APIs used here.
 - Release and microphone protection are reactive. macOS can briefly select the headset input before the helper responds, and an app that chooses its own input can bypass the default-input policy.
 - Microphone protection waits if neither configured safe input is uniquely available. Releasing a Bluetooth connection is not proof that another device has begun playing audio.

@@ -5,7 +5,7 @@ struct QC35View: View {
         VStack(alignment: .leading, spacing: 16) {
             header
             VStack(alignment: .leading, spacing: 6) {
-                Text("Device").font(.subheadline).foregroundStyle(.secondary)
+                Text("Device").font(.subheadline.weight(.medium)).foregroundStyle(.primary)
                 devices
             }
             Divider().opacity(0.5)
@@ -32,7 +32,7 @@ struct QC35View: View {
 
     private func option(_ label: String, symbol: String, value: Bool, key: String) -> some View {
         HStack(spacing: 10) {
-            Image(systemName: symbol).font(.system(size: 18)).frame(width: 24).foregroundStyle(.secondary)
+            Image(systemName: symbol).font(.system(size: 18)).frame(width: 24).foregroundStyle(.primary)
             Text(label)
             Spacer(minLength: 12)
             Toggle(label, isOn: Binding(get: { value }, set: { model.setOption(key, $0) }))

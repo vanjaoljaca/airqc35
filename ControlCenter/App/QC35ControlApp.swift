@@ -22,6 +22,7 @@ final class QC35Panel: NSObject, NSWindowDelegate {
     static let shared = QC35Panel()
     private let model = QC35Model()
     private var panel: NSPanel?
+    private let logger = Logger(subsystem: "com.vanja.qc35.control", category: "presentation")
 
     func show() {
         if panel == nil { createPanel() }
@@ -33,8 +34,14 @@ final class QC35Panel: NSObject, NSWindowDelegate {
     }
 
     private func createPanel() {
-        let window = QC35GlassPanel(contentRect: NSRect(x: 0, y: 0, width: 320, height: 280),
-            styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        let window = QC35GlassPanel(contentRect: NSRect(x: 0, y: 0, width: 320, height: 284),
+            styleMask: [.borderless], backing: .buffered, defer: false)
+        configure(window)
+        window.contentView = makeGlass()
+        panel = window
+    }
+
+    private func configure(_ window: NSPanel) {
         window.title = "QC35"
         window.isReleasedWhenClosed = false
         window.hidesOnDeactivate = true
@@ -43,51 +50,16 @@ final class QC35Panel: NSObject, NSWindowDelegate {
         window.hasShadow = true
         window.level = .floating
         window.delegate = self
-        window.contentView = makeBackdrop()
-        panel = window
-    }
-
-    private func makeBackdrop() -> NSVisualEffectView {
-        let backdrop = NSVisualEffectView()
-        backdrop.material = .underWindowBackground
-        backdrop.blendingMode = .behindWindow
-        backdrop.state = .active
-        backdrop.wantsLayer = true
-        backdrop.layer?.cornerRadius = 26
-        backdrop.layer?.masksToBounds = true
-        embed(makeGlass(), in: backdrop)
-        return backdrop
-    }
-
-    private func embed(_ glass: NSView, in backdrop: NSView) {
-        glass.translatesAutoresizingMaskIntoConstraints = false
-        backdrop.addSubview(glass)
-        NSLayoutConstraint.activate([
-            glass.leadingAnchor.constraint(equalTo: backdrop.leadingAnchor),
-            glass.trailingAnchor.constraint(equalTo: backdrop.trailingAnchor),
-            glass.topAnchor.constraint(equalTo: backdrop.topAnchor),
-            glass.bottomAnchor.constraint(equalTo: backdrop.bottomAnchor)
-        ])
     }
 
     private func makeGlass() -> NSGlassEffectView {
-        let hosting = NSHostingView(rootView: QC35View(model: model))
         let glass = NSGlassEffectView()
-        glass.style = .clear
+        glass.style = .regular
         glass.cornerRadius = 26
         glass.effectIsInteractive = true
-        glass.contentView = hosting
-        recordMaterial(hosting)
+        glass.contentView = NSHostingView(rootView: QC35View(model: model))
+        logger.info("{\"event\":\"glass_configured\",\"container\":\"NSGlassEffectView\",\"style\":\"regular\",\"legacyBackdrop\":false}")
         return glass
-    }
-
-    private func recordMaterial(_ hosting: NSView) {
-        let values: [String: Any] = ["event": "glass_configured", "style": "clear", "container": "NSGlassEffectView", "backdrop": "NSVisualEffectView.behindWindow",
-            "hostingOpaque": hosting.isOpaque, "reduceTransparency": NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency,
-            "increaseContrast": NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast]
-        let path = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/QC35InputGuard/ControlCenter/material.json")
-        do { try JSONSerialization.data(withJSONObject: values, options: [.sortedKeys]).write(to: path, options: .atomic) }
-        catch { NSLog("{\"event\":\"glass_configuration_log_failed\",\"error\":\"%@\"}", error.localizedDescription) }
     }
 
     private func place(_ window: NSWindow) {
@@ -101,8 +73,10 @@ final class QC35Panel: NSObject, NSWindowDelegate {
 
 final class QC35GlassPanel: NSPanel {
     override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { true }
     override func cancelOperation(_ sender: Any?) { close() }
 }
 
 import SwiftUI
 import AppKit
+import OSLog
