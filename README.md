@@ -1,10 +1,10 @@
-# QC35 for macOS
+# AirQc35
 
-A macOS helper for QC35 headphones that stay connected after you close the lid or keep taking over your microphone.
+A macOS helper for Bose QC35 headphones that cling to your Mac, steal your microphone, or make switching to your phone a chore.
 
-![QC35 Control Center panel with device selection and two settings](docs/images/qc35-control-panel.jpg)
+![Device handoff and headset settings, shown before the AirQc35 rename](docs/images/qc35-control-panel.jpg)
 
-This is an experimental source release of a personal utility. Open it from its Control Center tile; it does not add a separate menu-bar icon.
+Open AirQc35 from Control Center. Native Liquid Glass, two switches, and one place to hand your headphones to another device. This is an experimental utility tested with a Bose QC35 II.
 
 ## What it does
 
@@ -19,37 +19,57 @@ The helper uses Core Audio, IOBluetooth, IOKit, and AppKit notifications. It has
 
 The companion currently targets macOS 27 and builds with Xcode 27. The project generator uses Node.js with TypeScript stripping support (Node 22.18 or newer). Development and hardware observations were on Apple silicon with a Bose QC35 II; other Bose models are unverified.
 
-## Build
+## Install from source
 
-From the repository root:
-
-```sh
-mkdir -p build
-xcrun swiftc -O -warnings-as-errors QC35InputGuard.swift -o build/QC35InputGuard
-node --experimental-strip-types ControlCenter/BuildProject.ts
-xcodebuild -project ControlCenter/QC35.xcodeproj -scheme QC35 \
-  -configuration Debug -derivedDataPath build/ControlCenter build
-```
-
-The app is produced at `build/ControlCenter/Build/Products/Debug/QC35.app`. The generated Xcode project uses local ad-hoc signing. This repository does not contain a notarized installer or distributable signed binary.
-
-## Local setup
-
-The helper and companion share `~/Library/Application Support/QC35InputGuard/config.json`. Create that directory, its `ControlCenter` subdirectory, and `~/Library/Logs/QC35InputGuard`, then copy `config.example.json` to `config.json` **only if no configuration already exists**. Set the exact headset and microphone names for your machine. The example microphone name is not universal.
+Install full Xcode 27 and Node.js 22.18 or newer first. Launch Xcode once to finish its setup, and select it in Xcode → Settings → Locations → Command Line Tools. Pair and connect your QC35 in macOS Bluetooth settings, then run:
 
 ```sh
-build/QC35InputGuard status
-build/QC35InputGuard prefer "Your microphone name"
-build/QC35InputGuard option releaseOnSleep true
-build/QC35InputGuard option avoidHeadsetMic true
-build/QC35InputGuard watch
+git clone https://github.com/vanjaoljaca/airqc35.git
+cd airqc35
+node --experimental-strip-types ControlCenter/Install.ts
 ```
 
-`status` reads live device state. `watch` runs the helper in the foreground; stop it with Control-C. Do not start a second watcher if you already installed a background instance. The companion's switches require a running helper to affect audio and lid behavior. This source release does not install or alter login services.
+The installer builds everything from this checkout, installs `~/Applications/AirQc35.app`, detects your headset and a safe microphone, and starts a per-user background helper. No `sudo`, downloaded helper binary, old disconnect script, or configuration from the author's computer is needed. Node and Xcode are build tools only; neither runs in the background.
 
-Install the built `QC35.app` in your Applications folder and launch it, then use macOS's Add Controls interface to add QC35 to Control Center. Pair the headset through macOS first. Opening the panel only queries an already-connected headset; connecting is an explicit device action.
+In macOS's **Add Controls** interface, find **AirQc35** and add its headphone button to Control Center. Clicking it opens the panel. There is no separate menu-bar icon. Allow Bluetooth access if macOS asks, and keep the helper enabled in Login Items for lid and microphone protection.
 
-An empty `visibleSourceAddresses` array shows all saved sources. To narrow the list, use addresses from the locally generated `ControlCenter/sources.json` cache. Keep that cache and your configuration private.
+If you renamed your headset, have more than one QC35, or want to choose the initial microphone explicitly:
+
+```sh
+node --experimental-strip-types ControlCenter/Install.ts \
+  --headset "Your headset name" --input "Your microphone name"
+```
+
+Setup does not guess when names are ambiguous. It preserves an existing configuration byte for byte, including device filters and switch settings. The default microphone choice is your current non-Bluetooth input, with the Mac's built-in microphone as fallback when available. On a desktop Mac without a built-in mic, it uses the selected safe input for both.
+
+To update, run `git pull` and the same install command again. Existing installations named QC35 are migrated to AirQc35 without resetting preferences. macOS may retain the old name on an existing Control Center button; remove and re-add that button if needed. Builds use local ad-hoc signing; this repository does not provide a notarized download.
+
+### Settings and removal
+
+The helper and app share `~/Library/Application Support/QC35InputGuard/config.json`. The internal folder and service names stay stable across the rename. You can change microphone preference without reinstalling:
+
+```sh
+"$HOME/Library/Application Support/QC35InputGuard/QC35InputGuard" prefer "Your microphone name"
+"$HOME/Library/Application Support/QC35InputGuard/QC35InputGuard" status
+```
+
+An empty `visibleSourceAddresses` array shows all saved headset sources, including offline pairings. To narrow the list, use addresses from the locally generated `ControlCenter/sources.json` cache. Keep that cache and your configuration private. Opening the panel queries an already-connected headset; connecting is an explicit device action.
+
+Uninstall the app and background service while preserving your settings:
+
+```sh
+node --experimental-strip-types ControlCenter/Install.ts --uninstall
+```
+
+Logs are local in `~/Library/Logs/QC35InputGuard`. The service is `com.vanja.qc35.inputguard`. There is one native Swift helper; it directly uses macOS APIs for connection release and microphone protection. Do not start a second `watch` process alongside the installed service.
+
+### Build without installing
+
+```sh
+node --experimental-strip-types ControlCenter/Install.ts --build-only
+```
+
+This creates the helper and Release app under `build/` without changing settings, installing a service, or opening the app.
 
 ## Tests
 
@@ -73,9 +93,10 @@ xcrun swiftc -swift-version 5 -warnings-as-errors -parse-as-library \
   ControlCenter/App/MacConnection.swift ControlCenter/App/BoseSources.swift \
   -o build/tests/QC35SelectionCacheTests
 build/tests/QC35SelectionCacheTests
+node --experimental-strip-types --test ControlCenter/Install.test.ts
 ```
 
-The current suite contains 31 policy/configuration tests, 21 offline protocol and selection checks, 13 native-operation lifecycle checks, and 3 selection-cache checks.
+The Swift suite contains 43 policy/configuration/setup tests, 21 offline protocol and selection checks, 13 native-operation lifecycle checks, and 3 selection-cache checks. Another 18 installer tests exercise clean installation, upgrades, service ownership, and failure handling with isolated files and a simulated service manager.
 
 ## Known limits
 
@@ -95,8 +116,9 @@ The current suite contains 31 policy/configuration tests, 21 offline protocol an
 - `ControlCenter/Widget/`: Control Center button.
 - `ControlCenter/Shared/`: foreground App Intent.
 - `ControlCenter/BuildProject.ts`: reproducible Xcode project generator.
+- `ControlCenter/Install.ts`: source build, first-run setup, service installation, updates, and uninstall.
 
-Live configuration, device caches, logs, local deployment scripts, receipts, and binaries are excluded from this repository.
+Live configuration, device caches, logs, old machine-specific deployment scripts, receipts, and binaries are excluded from this repository.
 
 ## Native API references
 
@@ -104,7 +126,7 @@ Live configuration, device caches, logs, local deployment scripts, receipts, and
 - [IOBluetooth connection release](https://developer.apple.com/documentation/iobluetooth/iobluetoothdevice/closeconnection())
 - [WidgetKit controls](https://developer.apple.com/documentation/widgetkit/controls-collection)
 - [Adopting Liquid Glass](https://developer.apple.com/documentation/technologyoverviews/adopting-liquid-glass)
-- [NSPopover](https://developer.apple.com/documentation/appkit/nspopover)
+- [NSGlassEffectView](https://developer.apple.com/documentation/appkit/nsglasseffectview)
 
 This is an independent project, not an official Bose product.
 

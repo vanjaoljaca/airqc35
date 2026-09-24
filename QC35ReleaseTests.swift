@@ -197,6 +197,7 @@ func runReleaseTests() {
     }
     test("enabled mic retains fallback and ambiguous-name behavior") {
         var config = Settings(); config.preferredInput = "Unavailable microphone"
+        config.fallbackInput = "MacBook Pro Microphone"
         var writes: [(AudioDeviceID, Bool)] = []; var states: [String] = []
         try restoreMicrophone(fakeAudioDevices(), config, apply: { writes.append(($0.id, $1)) }, state: { name, _ in states.append(name) })
         try require(writes.count == 1 && writes[0].0 == 3 && writes[0].1, "Fallback changed")
@@ -233,7 +234,169 @@ func runReleaseTests() {
             try require(rejected, "Invalid option arguments accepted: \(args)")
         }
     }
+    test("setup selects safe default and built-in fallback without model-specific names") {
+        try withSetupFixture { fixture in
+            try require(try fixture.configure() == .created, "Setup did not create configuration")
+            let values = try configurationDictionary(Data(contentsOf: fixture.paths.configuration))
+            try require(values["headsetName"] as? String == "bose QUIETCOMFORT 35 II", "Headset name not preserved")
+            try require(values["preferredInput"] as? String == "Studio USB" && values["fallbackInput"] as? String == "Internal Microphone", "Safe inputs not selected")
+            try require(values["visibleSourceAddresses"] as? [String] == [], "Setup hid discovered saved sources")
+            try require(values["avoidHeadsetMic"] as? Bool == true && values["releaseOnSleep"] as? Bool == true, "Setup options changed")
+            try require(FileManager.default.fileExists(atPath: fixture.paths.logs.path), "Log directory missing")
+            try require(FileManager.default.fileExists(atPath: fixture.paths.support.appendingPathComponent("ControlCenter").path), "ControlCenter directory missing")
+        }
+    }
+    test("setup replaces Bluetooth default input with unique built-in input") {
+        for defaultID: AudioDeviceID in [1, 4, 5] {
+            try withSetupFixture { fixture in
+                fixture.defaultInput = defaultID
+                _ = try fixture.configure()
+                let config = try JSONDecoder().decode(Settings.self, from: Data(contentsOf: fixture.paths.configuration))
+                try require(config.preferredInput == "Internal Microphone", "Bluetooth default selected")
+            }
+        }
+    }
+    test("setup rejects unavailable or ambiguous headset before creating configuration") {
+        for names in [[], ["Bose QC35", "QuietComfort 35 II"]] {
+            try withSetupFixture { fixture in
+                fixture.names = names
+                try requireRejected { _ = try fixture.configure() }
+                try fixture.requireNoFiles()
+            }
+        }
+    }
+    test("setup exact override supports renamed paired headset") {
+        try withSetupFixture { fixture in
+            fixture.names = ["Travel Headphones", "Bose QC35 II"]
+            _ = try fixture.configure(SetupOptions(headset: "Travel Headphones"))
+            let values = try configurationDictionary(Data(contentsOf: fixture.paths.configuration))
+            try require(values["headsetName"] as? String == "Travel Headphones", "Renamed override ignored")
+        }
+    }
+    test("setup rejects nonexistent or duplicate exact headset override") {
+        for names in [["Other headphones"], ["Travel", "Travel"]] {
+            try withSetupFixture { fixture in
+                fixture.names = names
+                try requireRejected { _ = try fixture.configure(SetupOptions(headset: "Travel")) }
+                try fixture.requireNoFiles()
+            }
+        }
+    }
+    test("setup explicit input resolves exact name or UID") {
+        for requested in ["Studio USB", "usb-uid"] {
+            try withSetupFixture { fixture in
+                fixture.defaultInput = 1
+                _ = try fixture.configure(SetupOptions(input: requested))
+                let values = try configurationDictionary(Data(contentsOf: fixture.paths.configuration))
+                try require(values["preferredInput"] as? String == "Studio USB", "Explicit input ignored")
+            }
+        }
+    }
+    test("setup rejects unsafe explicit input and missing safe fallback") {
+        for requested in ["bose QUIETCOMFORT 35 II", "Other Bluetooth", "Bluetooth LE", "Missing"] {
+            try withSetupFixture { fixture in
+                try requireRejected { _ = try fixture.configure(SetupOptions(input: requested)) }
+                try fixture.requireNoFiles()
+            }
+        }
+        try withSetupFixture { fixture in
+            fixture.inputs = fixture.inputs.filter { [1, 4, 5].contains($0.id) }
+            fixture.defaultInput = 1
+            try requireRejected { _ = try fixture.configure() }
+            try fixture.requireNoFiles()
+        }
+    }
+    test("setup works on desktop with safe USB input and no built-in microphone") {
+        try withSetupFixture { fixture in
+            fixture.inputs.removeAll { $0.id == 3 }
+            _ = try fixture.configure()
+            let config = try JSONDecoder().decode(Settings.self, from: Data(contentsOf: fixture.paths.configuration))
+            try require(config.preferredInput == "Studio USB" && config.fallbackInput == "Studio USB", "Desktop input rejected")
+        }
+    }
+    test("setup rejects duplicate built-in inputs and persisted input names") {
+        for duplicate in [SetupInput(id: 6, name: "Second Internal", uid: "other-internal", transport: kAudioDeviceTransportTypeBuiltIn),
+                          SetupInput(id: 6, name: "Studio USB", uid: "other-usb", transport: kAudioDeviceTransportTypeUSB)] {
+            try withSetupFixture { fixture in
+                fixture.inputs.append(duplicate)
+                try requireRejected { _ = try fixture.configure(SetupOptions(input: "usb-uid")) }
+                try fixture.requireNoFiles()
+            }
+        }
+    }
+    test("setup preserves existing configuration bytes and skips device discovery") {
+        try withSetupFixture { fixture in
+            try fixture.paths.prepare()
+            let original = legacyConfiguration()
+            try original.write(to: fixture.paths.configuration)
+            let outcome = try configureSetup(SetupOptions(headset: "Different", input: "Different"), paths: fixture.paths) {
+                throw AudioFailure(description: "Existing configuration triggered hardware discovery")
+            }
+            try require(outcome == .preserved && Data(contentsOf: fixture.paths.configuration) == original, "Existing configuration changed")
+        }
+    }
+    test("setup cannot overwrite configuration created during discovery") {
+        try withSetupFixture { fixture in
+            let original = legacyConfiguration()
+            try requireRejected {
+                _ = try configureSetup(SetupOptions(), paths: fixture.paths) {
+                    try fixture.paths.prepare()
+                    try original.write(to: fixture.paths.configuration)
+                    return fixture.snapshot()
+                }
+            }
+            try require(try Data(contentsOf: fixture.paths.configuration) == original, "Concurrent configuration overwritten")
+        }
+    }
+    test("setup rejects malformed options and accepts explicit paired values") {
+        let invalid = [["--headset"], ["--unknown", "value"], ["--input", ""], ["--headset", "A", "--headset", "B"], ["--input", "--headset"]]
+        for args in invalid { try requireRejected { _ = try SetupOptions.parse(args) } }
+        let options = try SetupOptions.parse(["--input", "Studio USB", "--headset", "Travel Headphones"])
+        try require(options.input == "Studio USB" && options.headset == "Travel Headphones", "Valid arguments changed")
+    }
     print("{\"event\":\"release_regressions_passed\",\"count\":\(passed),\"hardwareWrites\":0}")
+}
+
+final class SetupFixture {
+    let paths: SetupPaths
+    var names = ["bose QUIETCOMFORT 35 II"]
+    var defaultInput: AudioDeviceID = 2
+    var inputs = [
+        SetupInput(id: 1, name: "bose QUIETCOMFORT 35 II", uid: "bose-uid", transport: kAudioDeviceTransportTypeBluetooth),
+        SetupInput(id: 2, name: "Studio USB", uid: "usb-uid", transport: kAudioDeviceTransportTypeUSB),
+        SetupInput(id: 3, name: "Internal Microphone", uid: "internal-uid", transport: kAudioDeviceTransportTypeBuiltIn),
+        SetupInput(id: 4, name: "Other Bluetooth", uid: "other-bt", transport: kAudioDeviceTransportTypeBluetooth),
+        SetupInput(id: 5, name: "Bluetooth LE", uid: "ble", transport: kAudioDeviceTransportTypeBluetoothLE)
+    ]
+
+    init(directory: URL) {
+        paths = SetupPaths(support: directory.appendingPathComponent("Support"), logs: directory.appendingPathComponent("Logs"))
+    }
+
+    func configure(_ options: SetupOptions = SetupOptions()) throws -> SetupOutcome {
+        try configureSetup(options, paths: paths, discover: snapshot)
+    }
+
+    func snapshot() -> SetupDiscovery {
+        SetupDiscovery(pairedNames: names, inputs: inputs, defaultInput: defaultInput)
+    }
+
+    func requireNoFiles() throws {
+        try require(!FileManager.default.fileExists(atPath: paths.support.path), "Invalid setup created app support")
+        try require(!FileManager.default.fileExists(atPath: paths.logs.path), "Invalid setup created logs")
+    }
+}
+
+func withSetupFixture(_ body: (SetupFixture) throws -> Void) throws {
+    let directory = try configurationTestDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    try body(SetupFixture(directory: directory))
+}
+
+func requireRejected(_ body: () throws -> Void) throws {
+    do { try body() }
+    catch { return }
+    throw AudioFailure(description: "Invalid setup was accepted")
 }
 
 func configurationTestDirectory() throws -> URL {

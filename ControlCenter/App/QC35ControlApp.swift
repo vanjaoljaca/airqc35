@@ -8,6 +8,7 @@ struct QC35ControlApp: App {
 final class QC35ApplicationDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApplication.shared.setActivationPolicy(.accessory)
+        ControlCenter.shared.reloadControls(ofKind: "com.vanja.qc35.control.open")
         QC35Panel.shared.show()
     }
 
@@ -42,7 +43,7 @@ final class QC35Panel: NSObject, NSWindowDelegate {
     }
 
     private func configure(_ window: NSPanel) {
-        window.title = "QC35"
+        window.title = "AirQc35"
         window.isReleasedWhenClosed = false
         window.hidesOnDeactivate = true
         window.isOpaque = false
@@ -81,3 +82,4 @@ final class QC35GlassPanel: NSPanel {
 import SwiftUI
 import AppKit
 import OSLog
+import WidgetKit

@@ -1,5 +1,5 @@
 struct OpenQC35Intent: AppIntent {
-    static let title: LocalizedStringResource = "Open QC35"
+    static let title: LocalizedStringResource = "Open AirQc35"
     static var supportedModes: IntentModes { .foreground(.immediate) }
     static var allowedExecutionTargets: IntentExecutionTargets { .main }
 

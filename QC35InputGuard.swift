@@ -1,6 +1,6 @@
 struct Settings: Codable {
-    var preferredInput = "MacBook Pro Microphone"
-    var fallbackInput = "MacBook Pro Microphone"
+    var preferredInput = ""
+    var fallbackInput = ""
     var headsetName = "Bose QC35 II"
     var releaseOnSleep = true
     var avoidHeadsetMic = true
@@ -32,6 +32,160 @@ struct AudioFailure: Error, CustomStringConvertible {
     let description: String
 }
 
+struct SetupOptions {
+    var headset: String?
+    var input: String?
+
+    static func parse(_ arguments: [String]) throws -> SetupOptions {
+        var options = SetupOptions()
+        guard arguments.count.isMultiple(of: 2) else { throw usage() }
+        for index in stride(from: 0, to: arguments.count, by: 2) {
+            try options.accept(arguments[index], value: arguments[index + 1])
+        }
+        return options
+    }
+
+    private mutating func accept(_ flag: String, value: String) throws {
+        guard !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !value.hasPrefix("--") else { throw Self.usage() }
+        switch flag {
+        case "--headset" where headset == nil: headset = value
+        case "--input" where input == nil: input = value
+        default: throw Self.usage()
+        }
+    }
+
+    private static func usage() -> AudioFailure {
+        AudioFailure(description: "Usage: QC35InputGuard setup [--headset \"Exact paired name\"] [--input \"Exact input name or UID\"]")
+    }
+}
+
+struct SetupInput {
+    let id: AudioDeviceID
+    let name: String
+    let uid: String
+    let transport: UInt32
+
+    func isSafe(for headset: String) -> Bool {
+        !name.isEmpty && name.caseInsensitiveCompare(headset) != .orderedSame
+            && transport != kAudioDeviceTransportTypeBluetooth
+            && transport != kAudioDeviceTransportTypeBluetoothLE
+    }
+}
+
+struct SetupDiscovery {
+    let pairedNames: [String]
+    let inputs: [SetupInput]
+    let defaultInput: AudioDeviceID
+}
+
+struct SetupSelection {
+    let headset: String
+    let preferred: SetupInput
+    let fallback: SetupInput
+
+    static func discover(_ snapshot: SetupDiscovery, options: SetupOptions) throws -> SetupSelection {
+        let headset = try selectHeadset(snapshot.pairedNames, requested: options.headset)
+        let safe = snapshot.inputs.filter { $0.isSafe(for: headset) }
+        let builtIn = try selectBuiltIn(safe)
+        let preferred = try selectPreferred(snapshot, safe: safe, builtIn: builtIn, requested: options.input)
+        try requireUniqueName(preferred, in: snapshot.inputs)
+        if let builtIn { try requireUniqueName(builtIn, in: snapshot.inputs) }
+        return SetupSelection(headset: headset, preferred: preferred, fallback: builtIn ?? preferred)
+    }
+
+    private static func selectHeadset(_ names: [String], requested: String?) throws -> String {
+        let matches = names.filter { name in
+            if let requested { return name == requested }
+            return name.range(of: #"(?:qc\s*35|quietcomfort\s*35)(?:\b|ii)"#, options: [.regularExpression, .caseInsensitive]) != nil
+        }
+        guard matches.count == 1, let match = matches.first else {
+            throw AudioFailure(description: "Pair one QC35 in Bluetooth settings, or select its unique paired name with --headset \"Name\" (found \(matches.count) matches).")
+        }
+        return match
+    }
+
+    private static func selectBuiltIn(_ safe: [SetupInput]) throws -> SetupInput? {
+        let builtIn = safe.filter { $0.transport == kAudioDeviceTransportTypeBuiltIn }
+        guard builtIn.count <= 1 else {
+            throw AudioFailure(description: "Multiple built-in inputs found. Resolve duplicate audio devices before setup.")
+        }
+        return builtIn.first
+    }
+
+    private static func selectPreferred(_ snapshot: SetupDiscovery, safe: [SetupInput], builtIn: SetupInput?, requested: String?) throws -> SetupInput {
+        let matches = safe.filter { input in
+            if let requested { return input.name == requested || input.uid == requested }
+            return input.id == snapshot.defaultInput
+        }
+        if matches.count == 1 { return matches[0] }
+        if requested == nil, matches.isEmpty, let builtIn { return builtIn }
+        throw AudioFailure(description: "Select one available non-Bluetooth microphone with --input \"Exact name or UID\", or make it the default input and rerun setup.")
+    }
+
+    private static func requireUniqueName(_ input: SetupInput, in inputs: [SetupInput]) throws {
+        guard inputs.filter({ $0.name == input.name }).count == 1 else {
+            throw AudioFailure(description: "Input name \"\(input.name)\" is ambiguous. Rename duplicate inputs before setup.")
+        }
+    }
+
+    func configuration() throws -> Data {
+        try JSONSerialization.data(withJSONObject: [
+            "headsetName": headset, "preferredInput": preferred.name, "fallbackInput": fallback.name,
+            "releaseOnSleep": true, "avoidHeadsetMic": true, "visibleSourceAddresses": [String]()
+        ], options: [.prettyPrinted, .sortedKeys])
+    }
+}
+
+struct SetupPaths {
+    let support: URL
+    let logs: URL
+    var configuration: URL { support.appendingPathComponent("config.json") }
+
+    func prepare() throws {
+        for directory in [support, support.appendingPathComponent("ControlCenter"), logs] {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
+                attributes: [.posixPermissions: 0o700])
+        }
+    }
+}
+
+enum SetupOutcome: String { case created, preserved }
+
+func configureSetup(_ options: SetupOptions, paths: SetupPaths,
+                    discover: () throws -> SetupDiscovery) throws -> SetupOutcome {
+    if FileManager.default.fileExists(atPath: paths.configuration.path) {
+        try paths.prepare()
+        return .preserved
+    }
+    let data = try SetupSelection.discover(discover(), options: options).configuration()
+    try paths.prepare()
+    try data.write(to: paths.configuration, options: .withoutOverwriting)
+    return .created
+}
+
+func discoverSetupDevices() throws -> SetupDiscovery {
+    let paired = IOBluetoothDevice.pairedDevices() as? [IOBluetoothDevice] ?? []
+    let inputs = try devices().filter { $0.input && $0.alive }.map { device in
+        SetupInput(id: device.id, name: device.name, uid: try deviceString(device.id, kAudioDevicePropertyDeviceUID),
+            transport: try number(device.id, kAudioDevicePropertyTransportType))
+    }
+    return SetupDiscovery(pairedNames: paired.compactMap(\.name), inputs: inputs,
+        defaultInput: try number(system, kAudioHardwarePropertyDefaultInputDevice))
+}
+
+func runSetup(_ arguments: [String]) throws {
+    let paths = SetupPaths(support: root, logs: FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent("Library/Logs/QC35InputGuard"))
+    let outcome = try configureSetup(SetupOptions.parse(arguments), paths: paths, discover: discoverSetupDevices)
+    writeSetupEvent("setup_\(outcome.rawValue)", ["configuration": paths.configuration.path])
+}
+
+func writeSetupEvent(_ event: String, _ fields: [String: String], failure: Bool = false) {
+    let record = fields.merging(["event": event]) { _, new in new }
+    let data = try! JSONSerialization.data(withJSONObject: record, options: [.sortedKeys]) + Data([10])
+    (failure ? FileHandle.standardError : FileHandle.standardOutput).write(data)
+}
+
 let root = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/QC35InputGuard")
 let configURL = root.appendingPathComponent("config.json")
 let system = AudioObjectID(kAudioObjectSystemObject)
@@ -53,7 +207,11 @@ func number(_ object: AudioObjectID, _ selector: AudioObjectPropertySelector) th
 }
 
 func deviceName(_ id: AudioDeviceID) throws -> String {
-    var property = address(kAudioObjectPropertyName)
+    try deviceString(id, kAudioObjectPropertyName)
+}
+
+func deviceString(_ id: AudioDeviceID, _ selector: AudioObjectPropertySelector) throws -> String {
+    var property = address(selector)
     var value: Unmanaged<CFString>?
     var size = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
     try check(AudioObjectGetPropertyData(id, &property, 0, nil, &size, &value), "device name")
@@ -109,7 +267,7 @@ func patchSettings(_ changes: [String: Any], at url: URL = configURL) throws {
 
 func log(_ event: String, _ fields: [String: String] = [:]) {
     var record = fields
-    record.merge(["event": event, "time": ISO8601DateFormatter().string(from: Date()), "pid": String(getpid()), "service": "com.vanja.qc35.inputguard", "revision": "3", "runtimeRoot": root.path]) { _, new in new }
+    record.merge(["event": event, "time": ISO8601DateFormatter().string(from: Date()), "pid": String(getpid()), "service": "com.vanja.qc35.inputguard", "revision": "4", "runtimeRoot": root.path]) { _, new in new }
     do { try appendLog(JSONSerialization.data(withJSONObject: record, options: [.sortedKeys]) + Data([10])) }
     catch { fputs("QC35InputGuard logging failed: \(error)\n", stderr); exit(1) }
 }
@@ -497,9 +655,10 @@ func runCommand() throws {
     switch args.first ?? "watch" {
     case "watch": try Guard().start()
     case "status": try printStatus()
+    case "setup": try runSetup(Array(args.dropFirst()))
     case "prefer": try changePreference(Array(args.dropFirst()))
     case "option": try changeOption(Array(args.dropFirst()))
-    default: throw AudioFailure(description: "Usage: QC35InputGuard [watch|status|prefer \"Microphone name\"|option releaseOnSleep|avoidHeadsetMic true|false]")
+    default: throw AudioFailure(description: "Usage: QC35InputGuard [watch|status|setup [--headset \"Name\"] [--input \"Name or UID\"]|prefer \"Microphone name\"|option releaseOnSleep|avoidHeadsetMic true|false]")
     }
 }
 
@@ -543,7 +702,11 @@ func changeOption(_ args: [String], at url: URL = configURL) throws {
 runReleaseTests()
 #else
 do { try runCommand() }
-catch { fputs("QC35InputGuard: \(error)\n", stderr); exit(1) }
+catch {
+    if CommandLine.arguments.dropFirst().first == "setup" { writeSetupEvent("setup_failed", ["error": String(describing: error)], failure: true) }
+    else { fputs("QC35InputGuard: \(error)\n", stderr) }
+    exit(1)
+}
 #endif
 
 import Foundation

@@ -22,7 +22,7 @@ function target(name: string, product: string, bundle: string, type: string, pat
 }
 const widget = target('QC35Widget', 'QC35Widget', 'com.vanja.qc35.control.widget', 'com.apple.product-type.app-extension', ['Widget/QC35Control.swift', 'Shared/OpenQC35Intent.swift'], {
   SKIP_INSTALL: 'YES', APPLICATION_EXTENSION_API_ONLY: 'YES', ENABLE_APP_SANDBOX: 'YES', CODE_SIGN_ENTITLEMENTS: 'Widget.entitlements', SWIFT_ACTIVE_COMPILATION_CONDITIONS: 'WIDGET_EXTENSION' });
-const host = target('QC35', 'QC35', 'com.vanja.qc35.control', 'com.apple.product-type.application', ['App/QC35ControlApp.swift', 'App/QC35View.swift', 'App/QC35Model.swift', 'App/BoseSources.swift', 'App/MacConnection.swift', 'Shared/OpenQC35Intent.swift'], { ENABLE_APP_SANDBOX: 'NO' });
+const host = target('QC35', 'AirQc35', 'com.vanja.qc35.control', 'com.apple.product-type.application', ['App/QC35ControlApp.swift', 'App/QC35View.swift', 'App/QC35Model.swift', 'App/BoseSources.swift', 'App/MacConnection.swift', 'Shared/OpenQC35Intent.swift'], { ENABLE_APP_SANDBOX: 'NO' });
 objects[host].dependencies.push(object('widgetdependency', { isa: 'PBXTargetDependency', target: widget, targetProxy: object('widgetproxy', { isa: 'PBXContainerItemProxy', containerPortal: id('project'), proxyType: 1, remoteGlobalIDString: widget, remoteInfo: 'QC35Widget' }) }));
 objects[host].buildPhases.push(object('embed', { isa: 'PBXCopyFilesBuildPhase', buildActionMask: 2147483647, dstPath: '', dstSubfolderSpec: 13, name: 'Embed App Extensions', runOnlyForDeploymentPostprocessing: 0,
   files: [object('embedwidget', { isa: 'PBXBuildFile', fileRef: id('QC35Widgetproduct'), settings: { ATTRIBUTES: ['RemoveHeadersOnCopy'] } })] }));
@@ -37,7 +37,7 @@ function plist(path: string, data: any) {
 }
 mkdirSync(join(root, 'QC35.xcodeproj'), { recursive: true });
 plist('QC35.xcodeproj/project.pbxproj', { archiveVersion: 1, classes: {}, objectVersion: 56, objects, rootObject: id('project') });
-const info = { CFBundleDevelopmentRegion: 'en', CFBundleExecutable: '$(EXECUTABLE_NAME)', CFBundleIdentifier: '$(PRODUCT_BUNDLE_IDENTIFIER)', CFBundleName: '$(PRODUCT_NAME)', CFBundleDisplayName: 'QC35', CFBundleShortVersionString: '1.0', CFBundleVersion: '5', LSMinimumSystemVersion: '27.0' };
+const info = { CFBundleDevelopmentRegion: 'en', CFBundleExecutable: '$(EXECUTABLE_NAME)', CFBundleIdentifier: '$(PRODUCT_BUNDLE_IDENTIFIER)', CFBundleName: '$(PRODUCT_NAME)', CFBundleDisplayName: 'AirQc35', CFBundleShortVersionString: '1.0', CFBundleVersion: '7', LSMinimumSystemVersion: '27.0' };
 plist('QC35.plist', { ...info, CFBundlePackageType: 'APPL', NSPrincipalClass: 'NSApplication', LSUIElement: true, NSBluetoothAlwaysUsageDescription: 'Read QC35 paired devices and reconnect the device you choose.' });
 plist('QC35Widget.plist', { ...info, CFBundlePackageType: 'XPC!', NSExtension: { NSExtensionPointIdentifier: 'com.apple.widgetkit-extension' } });
 plist('Widget.entitlements', { 'com.apple.security.app-sandbox': true });

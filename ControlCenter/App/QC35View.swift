@@ -22,7 +22,7 @@ struct QC35View: View {
     private var header: some View {
         HStack(spacing: 9) {
             Image(systemName: "headphones").font(.system(size: 19, weight: .medium))
-            Text("QC35").font(.headline)
+            Text("AirQc35").font(.headline)
             Spacer()
             if model.loading { ProgressView().controlSize(.small) }
             Button { model.refresh() } label: { Image(systemName: "arrow.clockwise").font(.subheadline) }
