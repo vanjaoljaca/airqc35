@@ -254,9 +254,24 @@ test('unrelated destination and symlink helper are rejected without service muta
   assert.equal(mutations(other.commands).length, 0);
 });
 
+test('CLI launched through a symlink runs instead of silently succeeding', { skip: process.platform !== 'darwin' }, () => {
+  const directory = mkdtempSync(join(tmpdir(), 'airqc35-cli-'));
+  const entry = join(directory, 'Install.ts');
+  try {
+    symlinkSync(fileURLToPath(new URL('./Install.ts', import.meta.url)), entry);
+    const result = spawnSync(process.execPath, ['--experimental-strip-types', entry, '--invalid-option'], { encoding: 'utf8', timeout: 5000 });
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /Unknown option: --invalid-option/);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { dirname, join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { buildCommands, createPaths, Identity, install, launchAgent, parseOptions, parseService, planService, runInstaller, uninstall } from './Install.ts';
 import type { Command, Context, Files, Service } from './Install.ts';
+import { mkdtempSync, symlinkSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';

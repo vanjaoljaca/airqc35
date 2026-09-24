@@ -399,7 +399,8 @@ function nativeContext(): Context {
     log: (event, fields = {}) => console.log(JSON.stringify({ event, ...fields })) };
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && existsSync(process.argv[1])
+    && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))) {
   try { runInstaller(nativeContext(), parseOptions(process.argv.slice(2))); }
   catch (error) { console.error(JSON.stringify({ event: 'installer_failed', error: String(error) })); process.exitCode = 1; }
 }
@@ -407,6 +408,6 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
-import { cpSync, existsSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
