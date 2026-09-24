@@ -209,6 +209,45 @@ test('legacy migration stops only the exact owned app path and unregisters sourc
   assert(registrations.some(command => command.args[0] === '-u' && command.args[1] === f.artifacts.app));
 });
 
+test('fresh install tolerates already unregistered payload and derived app copies', () => {
+  const f = fixture(); const run = f.context.run;
+  f.context.run = command => {
+    const result = run(command);
+    if (command.file.endsWith('/lsregister') && command.args[0] === '-u') return { status: 1, stdout: '', stderr: `failed to scan ${command.args[1]}: -10814\n from spotlight\n` };
+    return result;
+  };
+  install(f.context, noOpen, f.artifacts);
+  assert.deepEqual(f.events.filter(event => event.event === 'build_copy_already_unregistered').map(event => event.path), [f.artifacts.app, f.artifacts.builtApp]);
+  assert.deepEqual(f.commands.filter(command => command.file.endsWith('/lsregister')).at(-1)?.args, ['-f', f.paths.app]);
+  assert.equal(f.events.some(event => event.event === 'installed'), true);
+  assert.equal(f.events.some(event => event.event === 'installation_rolled_back'), false);
+});
+
+test('other build-copy unregister errors still fail and roll back installation', () => {
+  const f = fixture(); const run = f.context.run;
+  f.context.run = command => {
+    const result = run(command);
+    if (command.file.endsWith('/lsregister') && command.args[0] === '-u') return { status: 1, stdout: '', stderr: `failed to scan ${command.args[1]}: -10811\n from spotlight\n` };
+    return result;
+  };
+  assert.throws(() => install(f.context, noOpen, f.artifacts), /lsregister failed/);
+  assert.equal(f.events.some(event => event.event === 'installed'), false);
+  assert.equal(f.files.exists(f.paths.app), false);
+  assert.equal(f.events.some(event => event.event === 'installation_rolled_back'), true);
+});
+
+test('installed-app registration remains strict even for application-not-found errors', () => {
+  const f = fixture(); const run = f.context.run;
+  f.context.run = command => {
+    const result = run(command);
+    if (command.file.endsWith('/lsregister') && command.args[0] === '-f') return { status: 1, stdout: '', stderr: `failed to scan ${command.args[1]}: -10814\n from spotlight\n` };
+    return result;
+  };
+  assert.throws(() => install(f.context, noOpen, f.artifacts), /lsregister failed/);
+  assert.equal(f.events.some(event => event.event === 'installed'), false);
+  assert.equal(f.files.exists(f.paths.app), false);
+});
+
 test('update and migration stop verified embedded widgets before moving their apps, preserving other widget paths', () => {
   const f = fixture(); f.existing('new helper'); f.app(f.paths.legacyApp);
   const executable = (app: string) => join(app, 'Contents/PlugIns/QC35Widget.appex/Contents/MacOS/QC35Widget');

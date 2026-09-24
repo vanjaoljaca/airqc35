@@ -134,7 +134,7 @@ export function install(context: Context, options: Options, artifacts: Artifacts
     applyService(context, paths, desired, plan, service, replacements);
     retireLegacyApp(context, paths, replacements);
     for (const source of new Set([artifacts.app, artifacts.builtApp].filter(Boolean) as string[])) {
-      if (source !== paths.app) execute(context, { file: registrationTool, args: ['-u', source] });
+      if (source !== paths.app) unregisterBuildCopy(context, source);
     }
     execute(context, { file: registrationTool, args: ['-f', paths.app] });
   } catch (error) {
@@ -285,6 +285,18 @@ function retireLegacyApp(context: Context, paths: Paths, replacements: Replaceme
   const previous = `${paths.legacyApp}.previous-${randomUUID()}`;
   context.files.move(paths.legacyApp, previous);
   replacements.push({ destination: paths.legacyApp, previous });
+}
+
+function unregisterBuildCopy(context: Context, source: string): void {
+  const command = { file: registrationTool, args: ['-u', source] };
+  context.log('command_started', { executable: command.file, arguments: command.args });
+  const result = context.run(command);
+  if (result.status === 0) return;
+  const lines = result.stderr.trim().split(/\r?\n/).map(line => line.trim());
+  if (result.status === 1 && lines[0] === `failed to scan ${source}: -10814` && lines.slice(1).every(line => line === '' || line === 'from spotlight')) {
+    context.log('build_copy_already_unregistered', { path: source }); return;
+  }
+  throw new Error(`lsregister failed (${result.status}): ${result.stderr.trim() || result.stdout.slice(-4000)}`);
 }
 
 function removeOwnedApp(context: Context, app: string): void {

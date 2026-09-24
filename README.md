@@ -96,7 +96,7 @@ build/tests/QC35SelectionCacheTests
 node --experimental-strip-types --test ControlCenter/Install.test.ts
 ```
 
-The Swift suite contains 43 policy/configuration/setup tests, 21 offline protocol and selection checks, 13 native-operation lifecycle checks, and 3 selection-cache checks. Another 19 installer tests exercise clean installation, upgrades, service ownership, symlinked checkouts, and failure handling with isolated files and a simulated service manager.
+The Swift suite contains 43 policy/configuration/setup tests, 21 offline protocol and selection checks, 13 native-operation lifecycle checks, and 3 selection-cache checks. Another 22 installer tests exercise clean installation, upgrades, service ownership, symlinked checkouts, and failure handling with isolated files and a simulated service manager.
 
 ## Known limits
 
