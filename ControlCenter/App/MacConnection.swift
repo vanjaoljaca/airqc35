@@ -6,6 +6,7 @@ final class MacConnection: NSObject {
     private var poll: DispatchWorkItem?
     private var operationID: UUID?
     private var operationName: String?
+    private var targetAddress: String?
     private var connectPending = false
     private var releasePending = false
     private var timedOut = false
@@ -15,12 +16,12 @@ final class MacConnection: NSObject {
     private let releaseQueue = DispatchQueue(label: "com.vanja.qc35.control.release")
     private let logger = Logger(subsystem: "com.vanja.qc35.control", category: "mac_connection")
 
-    func connect(completion: @escaping (Result<Void, Error>) -> Void) {
-        start("connect", completion: completion) { try begin() }
+    func connect(address: String? = nil, completion: @escaping (Result<Void, Error>) -> Void) {
+        start("connect", completion: completion) { try begin(address: address) }
     }
 
-    private func begin() throws {
-        let target = try resolve()
+    private func begin(address: String?) throws {
+        let target = try resolve(address: address)
         if target.isConnected() { finish(.success(())); return }
         device = target
         markConnectPending()
@@ -46,12 +47,12 @@ final class MacConnection: NSObject {
         if !connectPending && !releasePending { finish(.failure(CancellationError())) }
     }
 
-    func release(completion: @escaping (Result<Void, Error>) -> Void) {
-        start("release", completion: completion) { try beginRelease() }
+    func release(address: String? = nil, completion: @escaping (Result<Void, Error>) -> Void) {
+        start("release", completion: completion) { try beginRelease(address: address) }
     }
 
-    private func beginRelease() throws {
-        let target = try resolve()
+    private func beginRelease(address: String?) throws {
+        let target = try resolve(address: address)
         device = target
         guard target.isConnected() else { finish(.success(())); return }
         guard let token = operationID else { return }
@@ -78,12 +79,12 @@ final class MacConnection: NSObject {
         schedulePoll(token) { self.verifyReleased(token) }
     }
 
-    func activateOutput(completion: @escaping (Result<Void, Error>) -> Void) {
-        start("output", completion: completion) { try beginOutput() }
+    func activateOutput(address: String? = nil, completion: @escaping (Result<Void, Error>) -> Void) {
+        start("output", completion: completion) { try beginOutput(address: address) }
     }
 
-    private func beginOutput() throws {
-        device = try resolve()
+    private func beginOutput(address: String?) throws {
+        device = try resolve(address: address, requireUniqueName: true)
         guard let token = operationID else { return }
         verifyOutput(token)
     }
@@ -160,18 +161,63 @@ final class MacConnection: NSObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1, execute: work)
     }
 
-    private func resolve() throws -> IOBluetoothDevice {
+    private func resolve(address: String?, requireUniqueName: Bool = false) throws -> IOBluetoothDevice {
+        let requested = try address.map(Self.validatedAddress)
+        let name = try requested == nil ? configuredName() : nil
+        let paired = IOBluetoothDevice.pairedDevices() as? [IOBluetoothDevice] ?? []
+        let records = paired.map { (name: $0.name, address: $0.addressString) }
+        let index = try Self.pairedIndex(address: requested, name: name, records: records, requireUniqueName: requireUniqueName)
+        targetAddress = try Self.validatedAddress(paired[index].addressString ?? "")
+        return paired[index]
+    }
+
+    private func configuredName() throws -> String {
         let path = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/QC35InputGuard/config.json")
         let config = try JSONSerialization.jsonObject(with: Data(contentsOf: path)) as? [String: Any]
         guard let name = config?["headsetName"] as? String else { throw failure("QC35 configuration unavailable") }
-        let matches = (IOBluetoothDevice.pairedDevices() as? [IOBluetoothDevice] ?? []).filter { $0.name == name }
-        guard matches.count == 1 else { throw failure("QC35 must match one paired device") }
-        return matches[0]
+        return name
     }
 
+    private static func pairedIndex(address: String?, name: String?, records: [(name: String?, address: String?)], requireUniqueName: Bool = false) throws -> Int {
+        let requested = try address.map(validatedAddress)
+        let matches = records.indices.filter { index in
+            if let requested { return normalizedAddress(records[index].address) == requested }
+            return name != nil && records[index].name == name
+        }
+        guard matches.count == 1 else { throw targetFailure("QC35 must match one already-paired device") }
+        let index = matches[0]
+        if requireUniqueName { try requireUniqueOutputName(records[index].name, records: records) }
+        return index
+    }
+
+    private static func requireUniqueOutputName(_ name: String?, records: [(name: String?, address: String?)]) throws {
+        guard let name, !name.isEmpty, records.filter({ $0.name == name }).count == 1 else {
+            throw BoseSourcesError(code: "mac_output_failed", detail: "QC35 audio output requires a unique paired device name")
+        }
+    }
+
+    private static func normalizedAddress(_ address: String?) -> String? {
+        guard let value = address?.trimmingCharacters(in: .whitespacesAndNewlines) else { return nil }
+        let pattern = "^(?:[0-9a-fA-F]{12}|(?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}|(?:[0-9a-fA-F]{2}-){5}[0-9a-fA-F]{2})$"
+        guard value.range(of: pattern, options: .regularExpression) != nil else { return nil }
+        return value.replacingOccurrences(of: ":", with: "").replacingOccurrences(of: "-", with: "").uppercased()
+    }
+
+    private static func validatedAddress(_ address: String) throws -> String {
+        guard let normalized = normalizedAddress(address) else { throw targetFailure("Invalid headset Bluetooth address") }
+        return normalized
+    }
+
+    private static func targetFailure(_ detail: String) -> BoseSourcesError { BoseSourcesError(code: "mac_target_failed", detail: detail) }
+
     @objc func connectionComplete(_ device: IOBluetoothDevice!, status: IOReturn) {
-        guard let device, device.addressString == self.device?.addressString else { return }
-        connected(status, isConnected: device.isConnected())
+        guard let device else { return }
+        receiveConnection(address: device.addressString, status: status) { device.isConnected() }
+    }
+
+    private func receiveConnection(address: String?, status: IOReturn, isConnected: () -> Bool) {
+        guard connectPending, let targetAddress, Self.normalizedAddress(address) == targetAddress else { return }
+        connected(status, isConnected: isConnected())
     }
 
     private func connected(_ status: IOReturn, isConnected: Bool) {
@@ -189,7 +235,7 @@ final class MacConnection: NSObject {
         deadline?.cancel(); deadline = nil
         poll?.cancel(); poll = nil
         if let name = operationName { logFinished(name, result) }
-        operationID = nil; operationName = nil; selectedOutput = nil
+        operationID = nil; operationName = nil; selectedOutput = nil; targetAddress = nil
         connectPending = false; releasePending = false; timedOut = false; cancelled = false
         nativeOwner = nil
         device = nil
@@ -288,6 +334,57 @@ private enum MacAudioOutput {
 extension MacConnection {
     static func runOfflineTests() throws -> Int {
         try testConnectTimeout() + testConnectCancellation() + testReleaseCancellation() + testOutputCancellation()
+            + testPairedTargetSelection() + testExplicitAddressValidation() + testTargetCallbacks()
+    }
+
+    private static func testPairedTargetSelection() throws -> Int {
+        let records: [(name: String?, address: String?)] = [("QC35", "AA-bb-CC-dd-EE-01"), ("QC35", "11-22-33-44-55-66"), ("Travel QC35", "22-33-44-55-66-77")]
+        try require(try pairedIndex(address: "aa:bb:cc:dd:ee:01", name: nil, records: records) == 0, "Explicit address must normalize the paired hyphen format")
+        try require(try pairedIndex(address: "112233445566", name: nil, records: records) == 1, "Explicit address must select the intended device despite duplicate names")
+        try require(try pairedIndex(address: nil, name: "Travel QC35", records: records) == 2, "Default selection must preserve exact configured-name matching")
+        try require((try? pairedIndex(address: nil, name: "QC35", records: records)) == nil, "Ambiguous default names must remain rejected")
+        try require((try? pairedIndex(address: "99:88:77:66:55:44", name: "QC35", records: records)) == nil, "Unpaired explicit address must never fall back to a configured name")
+        try require((try? pairedIndex(address: "AA:BB:CC:DD:EE:01", name: nil, records: records + [("Duplicate", "aabbccddee01")])) == nil, "Duplicate paired addresses must fail closed")
+        try require((try? pairedIndex(address: "AA:BB:CC:DD:EE:01", name: nil, records: records, requireUniqueName: true)) == nil, "Address-selected output must reject an ambiguous paired name")
+        try require(try pairedIndex(address: "22:33:44:55:66:77", name: nil, records: records, requireUniqueName: true) == 2, "Unique paired output name remains eligible")
+        return 8
+    }
+
+    private static func testExplicitAddressValidation() throws -> Int {
+        let invalid = ["", "1:22:33:44:55:66", "11:22:33:44:55", "11:22:33:44:55:66:77", "GG:22:33:44:55:66", "11:22-33:44:55:66", "112233445566junk"]
+        for address in invalid { try require(normalizedAddress(address) == nil, "Malformed address must not normalize: \(address)") }
+        try require(normalizedAddress(" \naA-Bb-cC-dD-eE-fF\t") == "AABBCCDDEEFF", "Case and outer whitespace must normalize")
+        let subject = MacConnection()
+        var rejected = 0
+        let complete: (Result<Void, Error>) -> Void = { if case .failure(let error as BoseSourcesError) = $0, error.code == "mac_target_failed" { rejected += 1 } }
+        subject.connect(address: "not an address", completion: complete)
+        subject.release(address: "not an address", completion: complete)
+        subject.activateOutput(address: "not an address", completion: complete)
+        try require(rejected == 3 && subject.completion == nil && subject.targetAddress == nil, "Invalid explicit targets must fail before paired-device discovery or native actions")
+        return invalid.count + 2
+    }
+
+    private static func testTargetCallbacks() throws -> Int {
+        let subject = MacConnection()
+        var callbacks = 0; var probes = 0; var attemptedStarts = 0
+        let beginA = { subject.targetAddress = "AABBCCDDEE01"; subject.markConnectPending() }
+        let beginB = { subject.targetAddress = "112233445566"; subject.markConnectPending() }
+        subject.start("connect", completion: { _ in callbacks += 1 }, begin: beginA)
+        let tokenA = subject.operationID!
+        subject.receiveConnection(address: "11-22-33-44-55-66", status: kIOReturnSuccess) { probes += 1; return true }
+        try require(probes == 0 && callbacks == 0 && subject.connectPending, "Another device's callback must not even probe or finish the current target")
+        subject.cancel()
+        subject.start("connect", completion: { _ in }, begin: { attemptedStarts += 1; beginB() })
+        try require(attemptedStarts == 0 && subject.targetAddress == "AABBCCDDEE01", "Cancellation must keep the pending target's busy ownership")
+        subject.receiveConnection(address: "aa:bb:cc:dd:ee:01", status: kIOReturnSuccess) { probes += 1; return true }
+        try require(callbacks == 0 && subject.completion == nil && subject.targetAddress == nil, "Cancelled target's normalized callback must only drain its own operation")
+        subject.start("connect", completion: { _ in callbacks += 1 }, begin: beginB)
+        subject.receiveConnection(address: "AA-BB-CC-DD-EE-01", status: kIOReturnSuccess) { probes += 1; return true }
+        subject.operationExpired(tokenA)
+        try require(probes == 1 && callbacks == 0 && subject.connectPending, "Old target callback or deadline must not complete the new target")
+        subject.receiveConnection(address: "11:22:33:44:55:66", status: kIOReturnSuccess) { probes += 1; return true }
+        try require(probes == 2 && callbacks == 1 && subject.completion == nil, "New target must complete only with its own normalized callback")
+        return 5
     }
 
     private static func testConnectTimeout() throws -> Int {

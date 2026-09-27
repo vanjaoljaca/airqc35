@@ -59,7 +59,9 @@ final class QC35Panel: NSObject, NSWindowDelegate {
         glass.style = .regular
         glass.cornerRadius = 26
         glass.effectIsInteractive = true
-        glass.contentView = NSHostingView(rootView: QC35View(model: model))
+        glass.contentView = NSHostingView(rootView: QC35View(model: model, heightChanged: { [weak self] height in
+            self?.resize(to: height)
+        }))
         logger.info("{\"event\":\"glass_configured\",\"container\":\"NSGlassEffectView\",\"style\":\"regular\",\"legacyBackdrop\":false}")
         return glass
     }
@@ -70,7 +72,18 @@ final class QC35Panel: NSObject, NSWindowDelegate {
             y: screen.visibleFrame.maxY - 8))
     }
 
+    private func resize(to height: CGFloat) {
+        guard let panel, height.isFinite, height > 0 else { return }
+        let maximum = (panel.screen ?? NSScreen.main)?.visibleFrame.height ?? 800
+        let target = min(ceil(height), maximum - 24)
+        guard abs(panel.frame.height - target) > 0.5 else { return }
+        panel.setContentSize(NSSize(width: 320, height: target))
+        place(panel)
+    }
+
     func windowWillClose(_ notification: Notification) { model.cancel() }
+    func windowDidBecomeKey(_ notification: Notification) { model.resumeHeadsetObservation() }
+    func windowDidResignKey(_ notification: Notification) { model.pauseHeadsetObservation() }
 }
 
 final class QC35GlassPanel: NSPanel {

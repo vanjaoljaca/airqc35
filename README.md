@@ -4,10 +4,11 @@ A macOS helper for Bose QC35 headphones that cling to your Mac, steal your micro
 
 ![Device handoff and headset settings, shown before the AirQc35 rename](docs/images/qc35-control-panel.jpg)
 
-Open AirQc35 from Control Center. Native Liquid Glass, two switches, and one place to hand your headphones to another device. This is an experimental utility tested with a Bose QC35 II.
+Open AirQc35 from Control Center. Native Liquid Glass, Bluetooth connection controls, two switches, and one place to hand your headphones to another device. This is an experimental utility tested with a Bose QC35 II.
 
 ## What it does
 
+- **Bluetooth:** lists QC35s already paired with this Mac, with live Connected to Mac / Disconnected status and explicit Connect / Disconnect buttons. Connect selects the headset for the helper and requests its Mac audio output after the Bluetooth link succeeds. A failed connection leaves your current headset settings intact.
 - **Lid release:** closes the configured headset connection when the lid closes, all displays sleep, or the system begins sleeping. The helper never reconnects on wake.
 - **Avoid headset mic:** restores a configured preferred microphone, with a configured fallback, while the headset is present. It does not remember an arbitrary previously selected microphone.
 - **Device:** hands the headset to the chosen device. Mac selection routes sound to QC35 and releases the other source; phone selection confirms the phone connection before releasing the Mac. The rows are saved destinations, so disconnected devices remain available to select. One checkmark records the last verified handoff.
@@ -53,7 +54,9 @@ The helper and app share `~/Library/Application Support/QC35InputGuard/config.js
 "$HOME/Library/Application Support/QC35InputGuard/QC35InputGuard" status
 ```
 
-An empty `visibleSourceAddresses` array shows all saved headset sources, including offline pairings. To narrow the list, use addresses from the locally generated `ControlCenter/sources.json` cache. Keep that cache and your configuration private. Opening the panel queries an already-connected headset; connecting is an explicit device action.
+An empty `visibleSourceAddresses` array shows all saved headset sources, including offline pairings. To narrow the list, use addresses from the locally generated `ControlCenter/sources.json` cache. Keep that cache and your configuration private. Opening the panel queries an already-connected headset; connecting is an explicit action. The Bluetooth section uses macOS connection state independently of these saved destinations. Switching to another headset clears the destination filter and waits for that headset's own source list.
+
+Headsets with QC35 or QuietComfort 35 in their names are recognized, along with the configured headset if you renamed it. New headphones must first be paired in macOS Bluetooth settings. Multiple headsets can connect by address, but each needs a different Bluetooth name for audio routing, handoff, and the background helper.
 
 Uninstall the app and background service while preserving your settings:
 
@@ -91,12 +94,17 @@ build/tests/QC35HandoffTests
 xcrun swiftc -swift-version 5 -warnings-as-errors -parse-as-library \
   -D QC35_MODEL_TEST ControlCenter/App/QC35Model.swift \
   ControlCenter/App/MacConnection.swift ControlCenter/App/BoseSources.swift \
+  ControlCenter/App/HeadsetBluetooth.swift \
   -o build/tests/QC35SelectionCacheTests
 build/tests/QC35SelectionCacheTests
+xcrun swiftc -swift-version 5 -warnings-as-errors -parse-as-library \
+  -D HEADSET_BLUETOOTH_TEST ControlCenter/App/HeadsetBluetooth.swift \
+  ControlCenter/HeadsetBluetoothTests.swift -o build/tests/HeadsetBluetoothTests
+build/tests/HeadsetBluetoothTests
 node --experimental-strip-types --test ControlCenter/Install.test.ts
 ```
 
-The Swift suite contains 43 policy/configuration/setup tests, 21 offline protocol and selection checks, 13 native-operation lifecycle checks, and 3 selection-cache checks. Another 22 installer tests exercise clean installation, upgrades, service ownership, symlinked checkouts, and failure handling with isolated files and a simulated service manager.
+The Swift suite contains 43 policy/configuration/setup tests, 21 offline protocol and selection checks, 35 native-operation lifecycle checks, 30 model/action/cache checks, and 14 Bluetooth inventory/event checks. Another 22 installer tests exercise clean installation, upgrades, service ownership, symlinked checkouts, and failure handling with isolated files and a simulated service manager.
 
 ## Known limits
 
