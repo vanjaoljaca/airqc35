@@ -38,8 +38,18 @@ final class QC35Panel: NSObject, NSWindowDelegate {
         let window = QC35GlassPanel(contentRect: NSRect(x: 0, y: 0, width: 320, height: 284),
             styleMask: [.borderless], backing: .buffered, defer: false)
         configure(window)
-        window.contentView = makeGlass()
+        window.contentView = makeSurface(frame: window.contentLayoutRect)
         panel = window
+    }
+
+    private func makeSurface(frame: NSRect) -> NSView {
+        let surface = QC35PanelSurface(frame: frame)
+        surface.wantsLayer = true
+        let glass = makeGlass()
+        glass.frame = surface.bounds
+        glass.autoresizingMask = [.width, .height]
+        surface.addSubview(glass)
+        return surface
     }
 
     private func configure(_ window: NSPanel) {
@@ -57,12 +67,12 @@ final class QC35Panel: NSObject, NSWindowDelegate {
     private func makeGlass() -> NSGlassEffectView {
         let glass = NSGlassEffectView()
         glass.style = .regular
-        glass.cornerRadius = 26
+        glass.cornerRadius = QC35PanelSurface.cornerRadius
         glass.effectIsInteractive = true
         glass.contentView = NSHostingView(rootView: QC35View(model: model, heightChanged: { [weak self] height in
             self?.resize(to: height)
         }))
-        logger.info("{\"event\":\"glass_configured\",\"container\":\"NSGlassEffectView\",\"style\":\"regular\",\"legacyBackdrop\":false}")
+        logger.info("{\"event\":\"glass_configured\",\"container\":\"NSGlassEffectView\",\"style\":\"regular\",\"cornerRadius\":26,\"surfaceClipped\":true}")
         return glass
     }
 
@@ -86,6 +96,20 @@ final class QC35Panel: NSObject, NSWindowDelegate {
     func windowDidResignKey(_ notification: Notification) { model.pauseHeadsetObservation() }
 }
 
+final class QC35PanelSurface: NSView {
+    static let cornerRadius: CGFloat = 26
+    override var wantsUpdateLayer: Bool { true }
+    override var isOpaque: Bool { false }
+
+    override func updateLayer() {
+        // Glass curvature alone does not clip every backing layer at the window perimeter.
+        layer?.backgroundColor = NSColor.clear.cgColor
+        layer?.cornerRadius = Self.cornerRadius
+        layer?.cornerCurve = .continuous
+        layer?.masksToBounds = true
+    }
+}
+
 final class QC35GlassPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
@@ -96,3 +120,4 @@ import SwiftUI
 import AppKit
 import OSLog
 import WidgetKit
+import QuartzCore
